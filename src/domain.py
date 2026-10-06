@@ -27,6 +27,31 @@ class InvalidTransition(DomainError):
     """The requested state transition is not valid."""
 
 
+class PolicyConflictError(ConflictError):
+    """Two committee members changed the same dataset policy concurrently."""
+
+    def __init__(self, message, conflict_id=None):
+        super().__init__(message)
+        self.conflict_id = conflict_id
+
+
+class AccessDenied(PermissionDenied):
+    """A data access request was denied by the policy chain."""
+
+    def __init__(self, message, reason=None, policy_version=None):
+        super().__init__(message)
+        self.reason = reason
+        self.policy_version = policy_version
+
+
+class BatchFailed(DomainError):
+    """A cascading policy change batch stopped midway; it can be retried."""
+
+    def __init__(self, message, batch_id=None):
+        super().__init__(message)
+        self.batch_id = batch_id
+
+
 class Role(str, Enum):
     viewer = "viewer"
     admin = "admin"

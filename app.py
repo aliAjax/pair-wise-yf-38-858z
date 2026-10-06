@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from src.http_api import create_server
+from src.ledger import ExternalLedger
 from src.repository import SQLiteRepository
 from src.rules import RuleEngine
 from src.service import DomainService
@@ -14,11 +15,17 @@ def main(argv=None):
     parser.add_argument("--db", default="./data.db", help="SQLite database path")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8304)
+    parser.add_argument(
+        "--ledger",
+        default=None,
+        help="外部台账 JSON 文件路径，供审计员对账使用",
+    )
     args = parser.parse_args(argv)
 
     repository = SQLiteRepository(args.db)
     rules = RuleEngine()
-    service = DomainService(repository, rules)
+    ledger = ExternalLedger(args.ledger)
+    service = DomainService(repository, rules, ledger=ledger)
     static_dir = Path(__file__).resolve().parent / "static"
     server = create_server(args.host, args.port, service, rules, str(static_dir))
 
