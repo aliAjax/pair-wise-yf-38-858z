@@ -13,6 +13,11 @@ def _validate_dataset(actor, data, lookup):
         raise ValidationError("access_policy is required")
 
 
+def _validate_dataset_policy(actor, data, lookup):
+    if len(data.get("access_policy", "")) < 3:
+        raise ValidationError("access_policy is required")
+
+
 def _validate_application(actor, data, lookup):
     dataset = _find_one(lookup, "dataset", "id", data.get("dataset_id"))
     if not dataset:
@@ -40,17 +45,17 @@ def _validate_grant_activate(actor, entity, data, lookup):
 
 
 CUSTOM_CREATE = {'dataset': _validate_dataset, 'application': _validate_application}
-CUSTOM_TRANSITIONS = {('application', 'approve'): _validate_approve, ('grant', 'activate'): _validate_grant_activate}
+CUSTOM_TRANSITIONS = {('application', 'approve'): _validate_approve, ('grant', 'activate'): _validate_grant_activate, ('dataset', 'update_policy'): _validate_dataset_policy}
 
 
 class RuleEngine:
     ALIASES = {'datasets': 'dataset', 'applications': 'application', 'grants': 'grant'}
     INITIAL_STATUS = {'dataset': 'registered', 'application': 'draft', 'grant': 'issued'}
-    TRANSITIONS = {'dataset': {'restrict': (('registered',), 'restricted'), 'publish': (('restricted',), 'published')}, 'application': {'submit': (('draft',), 'submitted'), 'review': (('submitted',), 'under_review'), 'approve': (('under_review',), 'approved'), 'reject': (('under_review',), 'rejected'), 'withdraw': (('submitted', 'under_review'), 'withdrawn')}, 'grant': {'activate': (('issued',), 'active'), 'revoke': (('active',), 'revoked'), 'expire': (('active',), 'expired')}}
+    TRANSITIONS = {'dataset': {'restrict': (('registered',), 'restricted'), 'publish': (('restricted',), 'published'), 'update_policy': (('registered', 'restricted', 'published'), None), 'reconcile': (('registered', 'restricted', 'published'), None)}, 'application': {'submit': (('draft',), 'submitted'), 'review': (('submitted',), 'under_review'), 'approve': (('under_review',), 'approved'), 'reject': (('under_review',), 'rejected'), 'withdraw': (('submitted', 'under_review'), 'withdrawn'), 'reconfirm': (('reconfirming',), 'approved')}, 'grant': {'activate': (('issued',), 'active'), 'revoke': (('active',), 'revoked'), 'expire': (('active',), 'expired'), 'suspend': (('active',), 'suspended'), 'fetch': (('issued', 'active', 'suspended', 'revoked', 'expired'), None)}}
     CREATE_REQUIRED = {'dataset': ('name', 'access_policy'), 'application': ('dataset_id', 'applicant_id', 'purpose'), 'grant': ('application_id', 'dataset_id', 'recipient')}
-    ACTION_REQUIRED = {('dataset', 'restrict'): ('reason',), ('application', 'review'): ('committee_id',), ('application', 'approve'): ('approvals', 'terms', 'expires_at'), ('application', 'reject'): ('reason',), ('application', 'withdraw'): ('reason',), ('grant', 'activate'): ('starts_at', 'expires_at'), ('grant', 'revoke'): ('reason',), ('grant', 'expire'): ('expired_at',)}
+    ACTION_REQUIRED = {('dataset', 'restrict'): ('reason',), ('dataset', 'update_policy'): ('access_policy',), ('application', 'review'): ('committee_id',), ('application', 'approve'): ('approvals', 'terms', 'expires_at'), ('application', 'reject'): ('reason',), ('application', 'withdraw'): ('reason',), ('grant', 'activate'): ('starts_at', 'expires_at'), ('grant', 'revoke'): ('reason',), ('grant', 'expire'): ('expired_at',), ('grant', 'suspend'): ('reason',)}
     CREATE_ROLES = {'dataset': ('admin', 'committee'), 'application': ('admin', 'applicant'), 'grant': ('admin', 'committee')}
-    ROLE_ACTIONS = {'restrict': ('admin', 'committee'), 'publish': ('admin', 'committee'), 'submit': ('admin', 'applicant'), 'review': ('admin', 'committee'), 'approve': ('admin', 'committee'), 'reject': ('admin', 'committee'), 'withdraw': ('admin', 'applicant'), 'activate': ('admin', 'committee'), 'revoke': ('admin', 'committee'), 'expire': ('admin', 'committee')}
+    ROLE_ACTIONS = {'restrict': ('admin', 'committee'), 'publish': ('admin', 'committee'), 'update_policy': ('admin', 'committee'), 'reconcile': ('admin', 'committee'), 'submit': ('admin', 'applicant'), 'review': ('admin', 'committee'), 'approve': ('admin', 'committee'), 'reject': ('admin', 'committee'), 'withdraw': ('admin', 'applicant'), 'reconfirm': ('admin', 'committee'), 'activate': ('admin', 'committee'), 'revoke': ('admin', 'committee'), 'expire': ('admin', 'committee'), 'suspend': ('admin', 'committee'), 'fetch': ('*',)}
 
     def normalize_kind(self, kind):
         return self.ALIASES.get(kind, kind)
@@ -90,6 +95,8 @@ class RuleEngine:
         if not transition:
             raise InvalidTransition("unknown action %s for %s" % (action, kind))
         allowed_statuses, next_status = transition
+        if next_status is None:
+            next_status = entity["status"]
         if entity["status"] not in allowed_statuses:
             raise InvalidTransition(
                 "cannot %s from status %s" % (action, entity["status"])

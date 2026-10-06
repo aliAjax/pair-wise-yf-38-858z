@@ -54,6 +54,16 @@ class SQLiteRepository:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(actor_id, idem_key)
                 );
+                CREATE TABLE IF NOT EXISTS external_ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    policy_version INTEGER NOT NULL,
+                    allowed INTEGER NOT NULL,
+                    recorded_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_external_ledger_entity
+                    ON external_ledger(entity_id, id);
             """)
 
     @staticmethod
@@ -104,10 +114,19 @@ class SQLiteRepository:
         return [self._entity_from_row(row) for row in rows]
 
     def find_entities(self, kind, field, value):
+        def resolve(entity, field_path):
+            current = entity
+            for part in field_path.split("."):
+                if isinstance(current, dict):
+                    current = current.get(part)
+                else:
+                    return None
+            return current
+
         return [
             entity
             for entity in self.list_entities(kind=kind)
-            if (entity["id"] == value if field == "id" else entity["data"].get(field) == value)
+            if (entity["id"] == value if field == "id" else resolve(entity, field) == value)
         ]
 
     def update_entity(self, entity_id, expected_version, status, data):
@@ -195,6 +214,48 @@ class SQLiteRepository:
                 "VALUES (?, ?, ?, ?)",
                 (actor_id, idem_key, entity_id, utcnow()),
             )
+
+    def record_external_ledger(self, entity_id, action, policy_version, allowed):
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO external_ledger(entity_id, action, policy_version, allowed, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (entity_id, action, int(policy_version), 1 if allowed else 0, utcnow()),
+            )
+
+    def latest_external_ledger(self, entity_id):
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM external_ledger WHERE entity_id = ? ORDER BY id DESC LIMIT 1",
+                (entity_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "entity_id": row["entity_id"],
+            "action": row["action"],
+            "policy_version": int(row["policy_version"]),
+            "allowed": bool(row["allowed"]),
+            "recorded_at": row["recorded_at"],
+        }
+
+    def list_external_ledger(self):
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM external_ledger ORDER BY id"
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "entity_id": row["entity_id"],
+                "action": row["action"],
+                "policy_version": int(row["policy_version"]),
+                "allowed": bool(row["allowed"]),
+                "recorded_at": row["recorded_at"],
+            }
+            for row in rows
+        ]
 
     def ping(self):
         with self._connect() as connection:

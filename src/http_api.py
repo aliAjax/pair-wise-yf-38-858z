@@ -85,6 +85,8 @@ def create_handler(service, rules, static_dir):
                         return self._send_html(200, handle.read())
                 if parts == ["api", "audit"]:
                     return self._send(200, {"items": service.audit_log()})
+                if parts == ["api", "audit", "reconcile"]:
+                    return self._send(200, service.reconcile_audit(self._actor()))
                 if len(parts) == 3 and parts[:2] == ["api", "entities"]:
                     return self._send(200, service.get(parts[2]))
                 if len(parts) >= 2 and parts[0] == "api":
@@ -131,6 +133,14 @@ def create_handler(service, rules, static_dir):
                             action,
                             body.pop("data", body),
                             body.pop("expected_version", None),
+                        ),
+                    )
+                if len(parts) == 4 and parts[0] == "api" and parts[1] == "datasets" and parts[3] == "reconfirm":
+                    body = self._body()
+                    return self._send(
+                        200,
+                        service.batch_reconfirm(
+                            actor, parts[2], body.get("application_ids", [])
                         ),
                     )
                 if len(parts) == 5 and parts[0] == "api" and parts[4] == "actions":
